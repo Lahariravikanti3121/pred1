@@ -16,8 +16,12 @@ try:
     scaler = metadata.get('scaler', StandardScaler())
     
     if not all_symptoms:
-        raise ValueError("No symptoms found in metadata")
-        
+        # If no symptoms list in metadata, try to get it from the model
+        try:
+            all_symptoms = model.feature_names_in_
+        except AttributeError:
+            raise ValueError("No symptoms list found in metadata or model")
+            
 except Exception as e:
     print(f"Error loading model or metadata: {str(e)}")
     raise
