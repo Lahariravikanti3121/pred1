@@ -7,13 +7,20 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 # Load the trained model and metadata
-model = joblib.load("disease_prediction_model.pkl")
-metadata = joblib.load("model_metadata.pkl")
-
-# Extract required components from metadata
-symptom_encoders = metadata['symptom_encoders']
-scaler = metadata['scaler']
-all_symptoms = metadata['all_symptoms']  # List of all 133 symptoms
+try:
+    model = joblib.load("disease_prediction_model.pkl")
+    metadata = joblib.load("model_metadata.pkl")
+    
+    # Extract required components from metadata with fallbacks
+    all_symptoms = metadata.get('all_symptoms', [])
+    scaler = metadata.get('scaler', StandardScaler())
+    
+    if not all_symptoms:
+        raise ValueError("No symptoms found in metadata")
+        
+except Exception as e:
+    print(f"Error loading model or metadata: {str(e)}")
+    raise
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -36,7 +43,7 @@ class PredictionResponse(BaseModel):
 
 def prepare_input(symptoms: List[str]) -> np.ndarray:
     """Prepare the input data for the model"""
-    # Create a zero vector of length 133
+    # Create a zero vector of length equal to number of symptoms
     feature_vector = np.zeros(len(all_symptoms))
     
     # Set 1 for each symptom that exists in the input
@@ -44,12 +51,18 @@ def prepare_input(symptoms: List[str]) -> np.ndarray:
         if symptom in all_symptoms:
             idx = all_symptoms.index(symptom)
             feature_vector[idx] = 1
+        else:
+            print(f"Warning: Symptom '{symptom}' not found in known symptoms list")
     
-    # Reshape to 2D array (1 sample, 133 features)
+    # Reshape to 2D array (1 sample, n features)
     feature_vector = feature_vector.reshape(1, -1)
     
     # Scale the features using the pre-fitted scaler
-    scaled_features = scaler.transform(feature_vector)
+    try:
+        scaled_features = scaler.transform(feature_vector)
+    except Exception as e:
+        print(f"Warning: Error in scaling features: {str(e)}")
+        scaled_features = feature_vector  # Use unscaled features as fallback
     
     return scaled_features
 
