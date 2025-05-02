@@ -36,4 +36,16 @@ ENV/
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Project specific
+*.log
+*.csv
+*.pkl
+*.json
+!disease_mapping.json
+!model_metadata.pkl
+!disease_prediction_model.pkl
+
+# Archive folder
+archive/ 
