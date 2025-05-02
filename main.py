@@ -4,10 +4,16 @@ import joblib
 import numpy as np
 from typing import List, Optional
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import StandardScaler
 
-# Load the trained model
+# Load the trained model and metadata
 model = joblib.load("disease_prediction_model.pkl")
+metadata = joblib.load("model_metadata.pkl")
+
+# Extract required components from metadata
+symptom_encoders = metadata['symptom_encoders']
+scaler = metadata['scaler']
+all_symptoms = metadata['all_symptoms']  # List of all 133 symptoms
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -30,25 +36,22 @@ class PredictionResponse(BaseModel):
 
 def prepare_input(symptoms: List[str]) -> np.ndarray:
     """Prepare the input data for the model"""
-    # Create a DataFrame with the same structure as training data
-    symptom_cols = [f"Symptom_{i+1}" for i in range(17)]  # Adjust based on your model's input features
-    df = pd.DataFrame(columns=symptom_cols)
+    # Create a zero vector of length 133
+    feature_vector = np.zeros(len(all_symptoms))
     
-    # Fill the symptoms
-    for i, symptom in enumerate(symptoms):
-        if i < len(symptom_cols):
-            df[symptom_cols[i]] = [symptom]
+    # Set 1 for each symptom that exists in the input
+    for symptom in symptoms:
+        if symptom in all_symptoms:
+            idx = all_symptoms.index(symptom)
+            feature_vector[idx] = 1
     
-    # Fill remaining columns with "none"
-    for col in symptom_cols[len(symptoms):]:
-        df[col] = ["none"]
+    # Reshape to 2D array (1 sample, 133 features)
+    feature_vector = feature_vector.reshape(1, -1)
     
-    # Encode symptoms
-    for col in symptom_cols:
-        le = LabelEncoder()
-        df[col] = le.fit_transform(df[col])
+    # Scale the features using the pre-fitted scaler
+    scaled_features = scaler.transform(feature_vector)
     
-    return df.values
+    return scaled_features
 
 @app.get("/")
 async def root():
@@ -58,8 +61,17 @@ async def root():
         "documentation": "/docs",
         "endpoints": {
             "/predict": "POST endpoint for disease prediction",
-            "/docs": "API documentation"
+            "/docs": "API documentation",
+            "/symptoms": "GET list of all supported symptoms"
         }
+    }
+
+@app.get("/symptoms")
+async def get_symptoms():
+    """Get list of all supported symptoms"""
+    return {
+        "total_symptoms": len(all_symptoms),
+        "symptoms": all_symptoms
     }
 
 @app.post("/predict", response_model=PredictionResponse)
