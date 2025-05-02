@@ -10,7 +10,11 @@ from sklearn.preprocessing import LabelEncoder
 model = joblib.load("disease_prediction_model.pkl")
 
 # Initialize FastAPI app
-app = FastAPI(title="Disease Prediction API")
+app = FastAPI(
+    title="Disease Prediction API",
+    description="API for predicting diseases based on symptoms",
+    version="1.0.0"
+)
 
 # API key for authentication
 API_KEY = "q9o3wef9U3nf983nNef923nfENf9WEn"  # Secure API key
@@ -46,11 +50,32 @@ def prepare_input(symptoms: List[str]) -> np.ndarray:
     
     return df.values
 
+@app.get("/")
+async def root():
+    """Root endpoint that provides API information"""
+    return {
+        "message": "Welcome to the Disease Prediction API",
+        "documentation": "/docs",
+        "endpoints": {
+            "/predict": "POST endpoint for disease prediction",
+            "/docs": "API documentation"
+        }
+    }
+
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(
     input: SymptomInput,
     x_api_key: Optional[str] = Header(None)
 ):
+    """
+    Predict disease based on symptoms
+    
+    - **symptoms**: List of symptoms
+    - **x_api_key**: API key for authentication
+    
+    Returns:
+    - Predicted disease and confidence score
+    """
     # Check API key
     if x_api_key != API_KEY:
         raise HTTPException(
