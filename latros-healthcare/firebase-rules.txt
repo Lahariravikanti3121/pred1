@@ -1,0 +1,188 @@
+// Firestore rules
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow authenticated users to read their own user document
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow patients to read and write their own data
+    match /patients/{patientId} {
+      allow read: if request.auth != null && (request.auth.uid == patientId || isDoctor() || isAdmin());
+      allow write: if request.auth != null && (request.auth.uid == patientId || isAdmin());
+    }
+    
+    // Allow doctors to read and write their own data
+    match /doctors/{doctorId} {
+      allow read: if request.auth != null;  // Anyone logged in can read doctor data
+      allow write: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+    
+    // Allow patients to create and read their own symptoms
+    match /symptoms/{symptomId} {
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAssignedDoctor(resource.data.userId) || 
+        isDoctorWithMatchingSpecialization(resource.data.domain) ||
+        isAdmin()
+      );
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAssignedDoctor(resource.data.userId) || 
+        isAdmin()
+      );
+    }
+    
+    // Allow patients to read their own reports
+    match /reports/{reportId} {
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAssignedDoctor(resource.data.userId) || 
+        isDoctorWithMatchingSpecialization(resource.data.domain) ||
+        isAdmin()
+      );
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && (
+        resource.data.userId == request.auth.uid || 
+        isAssignedDoctor(resource.data.userId) || 
+        isAdmin()
+      );
+    }
+    
+    // Allow patients to create and read their own appointments
+    match /appointments/{appointmentId} {
+      allow read: if request.auth != null && (
+        resource.data.patientId == request.auth.uid || 
+        resource.data.doctorId == request.auth.uid || 
+        isDoctorWithMatchingSpecialization(resource.data.domain) ||
+        isAdmin()
+      );
+      
+      // Only allow creation if there's a valid reportId
+      allow create: if request.auth != null && 
+        // Patient submitting appointment must have a valid report
+        (exists(/databases/$(database)/documents/reports/$(request.resource.data.reportId)) &&
+        get(/databases/$(database)/documents/reports/$(request.resource.data.reportId)).data.userId == request.auth.uid);
+        
+      allow update: if request.auth != null && (
+        resource.data.patientId == request.auth.uid || 
+        resource.data.doctorId == request.auth.uid || 
+        isDoctorWithMatchingSpecialization(resource.data.domain) ||
+        isAdmin()
+      );
+      
+      allow delete: if request.auth != null && (
+        resource.data.patientId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+    
+    // Allow doctors to create calendar queue entries
+    match /calendarQueue/{queueId} {
+      allow read: if request.auth != null && (
+        resource.data.doctorId == request.auth.uid || 
+        resource.data.patientId == request.auth.uid || 
+        isAdmin()
+      );
+      
+      allow create: if request.auth != null && 
+        // Only doctors can create calendar queue entries
+        isDoctor() && 
+        // The doctor must be assigned to the appointment
+        request.resource.data.doctorId == request.auth.uid;
+        
+      allow update, delete: if request.auth != null && (
+        resource.data.doctorId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+    
+    // Helper functions
+    function isAdmin() {
+      return request.auth != null && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+    
+    function isDoctor() {
+      return request.auth != null && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "doctor";
+    }
+    
+    function isAssignedDoctor(patientId) {
+      return isDoctor() && 
+        exists(/databases/$(database)/documents/appointments/{appointmentId}) &&
+        get(/databases/$(database)/documents/appointments/{appointmentId}).data.patientId == patientId &&
+        get(/databases/$(database)/documents/appointments/{appointmentId}).data.doctorId == request.auth.uid;
+    }
+    
+    function isDoctorWithMatchingSpecialization(domain) {
+      return isDoctor() && 
+        exists(/databases/$(database)/documents/doctors/{doctorId}) &&
+        get(/databases/$(database)/documents/doctors/{doctorId}).data.userId == request.auth.uid &&
+        get(/databases/$(database)/documents/doctors/{doctorId}).data.specialization == domain;
+    }
+
+    // Add these rules to ensure doctors can only access appointments in their specialization
+
+    // Helper function to check if a doctor has the required specialization
+    function isDoctorWithSpecialization(domain) {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/doctors/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/doctors/$(request.auth.uid)).data.specialty == domain;
+    }
+
+    // Update the appointments rules
+    match /appointments/{appointmentId} {
+      allow read: if request.auth != null && (
+        // Patients can read their own appointments
+        resource.data.patientId == request.auth.uid ||
+        // Doctors can read appointments assigned to them
+        resource.data.doctorId == request.auth.uid ||
+        // Doctors can read appointments in their specialization domain
+        isDoctorWithSpecialization(resource.data.domain)
+      );
+      
+      allow update: if request.auth != null && (
+        // Patients can update their own appointments
+        resource.data.patientId == request.auth.uid ||
+        // Doctors can update appointments assigned to them
+        resource.data.doctorId == request.auth.uid ||
+        // Doctors can claim appointments in their specialization domain
+        (isDoctorWithSpecialization(resource.data.domain) && 
+         request.resource.data.doctorId == request.auth.uid)
+      );
+      
+      allow delete: if request.auth != null && (
+        resource.data.patientId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+
+    // Calendar queue rules
+    match /calendarQueue/{queueId} {
+      allow create: if request.auth != null && 
+                     exists(/databases/$(database)/documents/doctors/$(request.auth.uid)) &&
+                     request.resource.data.doctorId == request.auth.uid;
+      allow read: if request.auth != null && (
+        resource.data.doctorId == request.auth.uid || 
+        resource.data.patientId == request.auth.uid || 
+        isAdmin()
+      );
+        
+      allow update, delete: if request.auth != null && (
+        resource.data.doctorId == request.auth.uid || 
+        isAdmin()
+      );
+    }
+  }
+}
